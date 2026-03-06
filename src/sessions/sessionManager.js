@@ -1,0 +1,149 @@
+const path = require('path');
+const qrcode = require('qrcode');
+const pino = require('pino');
+const { handleIncomingMessage } = require('../handlers/messageHandler');
+
+const STORAGE_DIR = path.join(__dirname, '..', '..', 'storage');
+const logger = pino({ level: 'warn' });
+
+// In-memory store of active sessions
+// Map<customerId, { socket, status, qr }>
+const sessions = new Map();
+
+let baileys = null;
+
+async function loadBaileys() {
+  if (!baileys) {
+    baileys = await import('@whiskeysockets/baileys');
+  }
+  return baileys;
+}
+
+async function startSession(customerId) {
+  if (sessions.has(customerId)) {
+    const existing = sessions.get(customerId);
+    if (existing.status === 'connected') {
+      return { status: 'already_connected' };
+    }
+  }
+
+  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestWaWebVersion } = await loadBaileys();
+
+  const authDir = path.join(STORAGE_DIR, customerId);
+  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+
+  const { version } = await fetchLatestWaWebVersion();
+  console.log(`[${customerId}] Using WA web version: ${version}`);
+
+  const socket = makeWASocket({
+    auth: state,
+    printQRInTerminal: false,
+    logger,
+    version,
+  });
+
+  const session = { socket, status: 'connecting', qr: null };
+  sessions.set(customerId, session);
+
+  return new Promise((resolve) => {
+    let resolved = false;
+
+    socket.ev.on('creds.update', saveCreds);
+
+    socket.ev.on('messages.upsert', (upsert) => {
+      handleIncomingMessage(customerId, upsert);
+    });
+
+    socket.ev.on('connection.update', async (update) => {
+      console.log(`[${customerId}] connection.update:`, JSON.stringify(update, null, 2));
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        const qrDataUrl = await qrcode.toDataURL(qr);
+        session.qr = qrDataUrl;
+        session.status = 'waiting_for_qr';
+
+        if (!resolved) {
+          resolved = true;
+          resolve({ status: 'qr_generated', qr: qrDataUrl });
+        }
+      }
+
+      if (connection === 'open') {
+        session.status = 'connected';
+        session.qr = null;
+        console.log(`[${customerId}] Connected`);
+
+        if (!resolved) {
+          resolved = true;
+          resolve({ status: 'connected' });
+        }
+      }
+
+      if (connection === 'close') {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+        const wasConnected = session.status === 'connected';
+
+        console.log(`[${customerId}] Disconnected (code: ${statusCode})`);
+        sessions.delete(customerId);
+
+        const shouldReconnect = !loggedOut && (wasConnected || statusCode === DisconnectReason.restartRequired);
+
+        if (loggedOut) {
+          const fs = require('fs/promises');
+          await fs.rm(authDir, { recursive: true, force: true }).catch(() => {});
+          session.status = 'logged_out';
+        } else if (shouldReconnect) {
+          console.log(`[${customerId}] Reconnecting...`);
+          startSession(customerId).catch((err) => {
+            console.error(`[${customerId}] Reconnect failed:`, err.message);
+          });
+        }
+
+        if (!resolved) {
+          resolved = true;
+          resolve({ status: 'disconnected', loggedOut });
+        }
+      }
+    });
+  });
+}
+
+function getSession(customerId) {
+  return sessions.get(customerId) || null;
+}
+
+function getSessionStatus(customerId) {
+  const session = sessions.get(customerId);
+  if (!session) return { status: 'not_found' };
+  return { status: session.status, qr: session.qr };
+}
+
+async function deleteSession(customerId) {
+  const session = sessions.get(customerId);
+  if (!session) return { status: 'not_found' };
+
+  try {
+    await session.socket.logout();
+  } catch {
+    // socket may already be closed
+    session.socket.end();
+  }
+
+  sessions.delete(customerId);
+
+  const fs = require('fs/promises');
+  const authDir = path.join(STORAGE_DIR, customerId);
+  await fs.rm(authDir, { recursive: true, force: true }).catch(() => {});
+
+  return { status: 'deleted' };
+}
+
+module.exports = {
+  sessions,
+  startSession,
+  getSession,
+  getSessionStatus,
+  deleteSession,
+};
