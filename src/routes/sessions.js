@@ -1,4 +1,5 @@
 const { Router } = require('express');
+const multer = require('multer');
 const {
   startSession,
   getSession,
@@ -7,6 +8,7 @@ const {
 } = require('../sessions/sessionManager');
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024 } });
 
 // POST /session/start/:customerId
 router.post('/session/start/:customerId', async (req, res) => {
@@ -57,6 +59,40 @@ router.post('/session/send/:customerId', async (req, res) => {
   } catch (err) {
     console.error(`[send] Error for ${req.params.customerId}:`, err.message);
     res.status(500).json({ error: 'Failed to send message' });
+  }
+});
+
+// POST /session/send-file/:customerId
+router.post('/session/send-file/:customerId', upload.single('file'), async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    const { chatId, fileName, caption } = req.body;
+
+    if (!chatId || !req.file) {
+      return res.status(400).json({ error: 'Missing "chatId" or "file" in form data' });
+    }
+
+    const jid = chatId.includes('@') ? chatId : `${chatId}@s.whatsapp.net`;
+
+    const session = getSession(customerId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    if (session.status !== 'connected') {
+      return res.status(400).json({ error: `Session not connected (status: ${session.status})` });
+    }
+
+    await session.socket.sendMessage(jid, {
+      image: req.file.buffer,
+      mimetype: req.file.mimetype,
+      fileName: fileName || req.file.originalname,
+      caption: caption || undefined,
+    });
+
+    res.json({ status: 'sent' });
+  } catch (err) {
+    console.error(`[send-file] Error for ${req.params.customerId}:`, err.message);
+    res.status(500).json({ error: 'Failed to send file' });
   }
 });
 

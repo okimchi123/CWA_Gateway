@@ -67,8 +67,13 @@ curl -X POST http://localhost:3000/api/session/send/customer1 \
   -H "Content-Type: application/json" \
   -d '{"to": "63XXXXXXXXXX", "message": "Hello from gateway!"}'
 ```
+one line:
+curl -X POST http://localhost:3000/api/session/send/customer1 -H "Content-Type: application/json" -d "{\"to\": \"63XXXXXXXXXX\", \"message\": \"Hello from gateway!\"}"
 
 Replace `63XXXXXXXXXX` with a real phone number (country code + number, no `+`).
+
+Test photo sending:
+curl -X POST http://localhost:3000/api/session/send-file/customer1 -F "chatId=639219909210@c.us" -F "fileName=images.jpg" -F "file=@images.jpg"
 
 ## 8. Test Incoming Messages
 
