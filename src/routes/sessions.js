@@ -6,6 +6,12 @@ const {
   getSessionStatus,
   deleteSession,
 } = require('../sessions/sessionManager');
+const {
+  generateWAMessageFromContent,
+  normalizeMessageContent,
+  isJidGroup,
+  generateMessageIDV2,
+} = require('@whiskeysockets/baileys');
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024 } });
@@ -93,6 +99,85 @@ router.post('/session/send-file/:customerId', upload.single('file'), async (req,
   } catch (err) {
     console.error(`[send-file] Error for ${req.params.customerId}:`, err.message);
     res.status(500).json({ error: 'Failed to send file' });
+  }
+});
+
+// POST /session/send-buttons/:customerId
+router.post('/session/send-buttons/:customerId', async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    const { to, body, buttons, header, footer } = req.body;
+
+    if (!to || !body || !buttons || !Array.isArray(buttons) || buttons.length === 0) {
+      return res.status(400).json({ error: 'Missing "to", "body", or "buttons" in body' });
+    }
+
+    if (buttons.length > 10) {
+      return res.status(400).json({ error: 'Maximum 10 buttons allowed' });
+    }
+
+    const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+
+    const session = getSession(customerId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    if (session.status !== 'connected') {
+      return res.status(400).json({ error: `Session not connected (status: ${session.status})` });
+    }
+
+    // Build native flow buttons
+    const nativeButtons = buttons.map((btn) => ({
+      name: 'quick_reply',
+      buttonParamsJson: JSON.stringify({
+        display_text: btn.buttonText,
+        id: btn.buttonId,
+      }),
+    }));
+
+    const content = {
+      interactiveMessage: {
+        nativeFlowMessage: { buttons: nativeButtons },
+        body: { text: body },
+        footer: footer ? { text: footer } : undefined,
+        header: header ? { title: header } : undefined,
+      },
+    };
+
+    const sock = session.socket;
+    const userJid = sock.authState?.creds?.me?.id || sock.user?.id;
+    const fullMsg = generateWAMessageFromContent(jid, content, {
+      userJid,
+      messageId: generateMessageIDV2(userJid),
+    });
+
+    const normalizedContent = normalizeMessageContent(fullMsg.message);
+    const additionalNodes = [
+      {
+        tag: 'biz',
+        attrs: {},
+        content: [{
+          tag: 'interactive',
+          attrs: { type: 'native_flow', v: '1' },
+          content: [{
+            tag: 'native_flow',
+            attrs: { v: '9', name: 'mixed' },
+          }],
+        }],
+      },
+    ];
+    if (!isJidGroup(jid)) {
+      additionalNodes.push({ tag: 'bot', attrs: { biz_bot: '1' } });
+    }
+
+    await sock.relayMessage(jid, fullMsg.message, {
+      messageId: fullMsg.key.id,
+      additionalNodes,
+    });
+    res.json({ status: 'sent' });
+  } catch (err) {
+    console.error(`[send-buttons] Error for ${req.params.customerId}:`, err.message);
+    res.status(500).json({ error: 'Failed to send buttons message' });
   }
 });
 

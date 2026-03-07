@@ -230,6 +230,7 @@ All endpoints require `x-api-key` header when `API_KEY` is set.
 | GET | `/api/session/status/:customerId` | - | Check connection status |
 | POST | `/api/session/send/:customerId` | `{ to, message }` | Send text message |
 | POST | `/api/session/send-file/:customerId` | Form: `chatId`, `file`, `fileName?`, `caption?` | Send image/file |
+| POST | `/api/session/send-buttons/:customerId` | `{ to, body, buttons, header?, footer? }` | Send interactive buttons (max 10) |
 | DELETE | `/api/session/:customerId` | - | Disconnect and delete session |
 | GET | `/health` | - | Health check (no auth needed) |
 

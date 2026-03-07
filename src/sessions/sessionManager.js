@@ -1,7 +1,7 @@
 const path = require('path');
 const qrcode = require('qrcode');
 const pino = require('pino');
-const { handleIncomingMessage } = require('../handlers/messageHandler');
+const { handleMessage } = require('../handlers/messageHandler');
 
 const STORAGE_DIR = path.join(__dirname, '..', '..', 'storage');
 const logger = pino({ level: 'warn' });
@@ -51,7 +51,7 @@ async function startSession(customerId) {
     socket.ev.on('creds.update', saveCreds);
 
     socket.ev.on('messages.upsert', (upsert) => {
-      handleIncomingMessage(customerId, upsert);
+      handleMessage(customerId, upsert);
     });
 
     socket.ev.on('connection.update', async (update) => {

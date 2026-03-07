@@ -20,28 +20,29 @@ async function forwardToWebhook(payload) {
   }
 }
 
-async function handleIncomingMessage(customerId, { messages, type }) {
+async function handleMessage(customerId, { messages, type }) {
   if (type !== 'notify') return;
 
   for (const msg of messages) {
-    if (msg.key.fromMe) continue;
-
     const text = msg.message?.conversation
       || msg.message?.extendedTextMessage?.text;
 
     if (!text) continue;
 
+    const direction = msg.key.fromMe ? 'outgoing' : 'incoming';
+
     const payload = {
       customerId,
+      type: direction,
       from: msg.key.remoteJid,
       pushName: msg.pushName || null,
       message: text,
       timestamp: msg.messageTimestamp,
     };
 
-    console.log(`[${customerId}] Incoming from ${payload.from}`);
+    console.log(`[${customerId}] ${direction} ${direction === 'incoming' ? 'from' : 'to'} ${payload.from}`);
     forwardToWebhook(payload);
   }
 }
 
-module.exports = { handleIncomingMessage };
+module.exports = { handleMessage };
