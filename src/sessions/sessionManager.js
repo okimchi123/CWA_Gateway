@@ -83,18 +83,16 @@ async function startSession(customerId) {
       if (connection === 'close') {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const loggedOut = statusCode === DisconnectReason.loggedOut;
-        const wasConnected = session.status === 'connected';
 
-        console.log(`[${customerId}] Disconnected (code: ${statusCode})`);
-        sessions.delete(customerId);
-
-        const shouldReconnect = !loggedOut && (wasConnected || statusCode === DisconnectReason.restartRequired);
+        console.log(`[${customerId}] Disconnected (code: ${statusCode}, loggedOut: ${loggedOut})`);
 
         if (loggedOut) {
+          sessions.delete(customerId);
           const fs = require('fs/promises');
           await fs.rm(authDir, { recursive: true, force: true }).catch(() => {});
           session.status = 'logged_out';
-        } else if (shouldReconnect) {
+        } else {
+          sessions.delete(customerId);
           console.log(`[${customerId}] Reconnecting...`);
           startSession(customerId).catch((err) => {
             console.error(`[${customerId}] Reconnect failed:`, err.message);
@@ -140,10 +138,27 @@ async function deleteSession(customerId) {
   return { status: 'deleted' };
 }
 
+async function restoreSessions() {
+  const fs = require('fs');
+  if (!fs.existsSync(STORAGE_DIR)) return;
+
+  const customers = fs.readdirSync(STORAGE_DIR).filter((name) => {
+    return fs.statSync(path.join(STORAGE_DIR, name)).isDirectory();
+  });
+
+  for (const customerId of customers) {
+    console.log(`[${customerId}] Restoring session...`);
+    startSession(customerId).catch((err) => {
+      console.error(`[${customerId}] Restore failed:`, err.message);
+    });
+  }
+}
+
 module.exports = {
   sessions,
   startSession,
   getSession,
   getSessionStatus,
   deleteSession,
+  restoreSessions,
 };
