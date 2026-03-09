@@ -175,44 +175,91 @@ GET /health
 
 ## Message Webhook
 
-The gateway forwards **both incoming and outgoing** messages to `MAIN_SAAS_WEBHOOK_URL` via POST:
+The gateway forwards **both incoming and outgoing** messages to `MAIN_SAAS_WEBHOOK_URL` via POST.
 
-**Incoming message (someone messages the connected number):**
+### Private text message
 ```json
 {
   "customerId": "customer1",
   "type": "incoming",
-  "from": "80376773001374@lid",
+  "chatType": "private",
+  "from": "639516185785",
   "pushName": "John Doe",
   "message": "Hi there!",
+  "messageType": "text",
   "timestamp": 1709812345
 }
 ```
 
-**Outgoing message (the connected number sends a message):**
+### Private image message
+```json
+{
+  "customerId": "customer1",
+  "type": "incoming",
+  "chatType": "private",
+  "from": "639516185785",
+  "pushName": "John Doe",
+  "message": "check this out",
+  "messageType": "image",
+  "timestamp": 1709812345,
+  "image": {
+    "base64": "/9j/4AAQSkZJRg...",
+    "mimetype": "image/jpeg",
+    "caption": "check this out"
+  }
+}
+```
+
+### Group message
+```json
+{
+  "customerId": "customer1",
+  "type": "incoming",
+  "chatType": "group",
+  "from": "120363044555888777",
+  "participant": "639516185785",
+  "pushName": "John Doe",
+  "message": "hello everyone",
+  "messageType": "text",
+  "timestamp": 1709812345
+}
+```
+
+### Outgoing message
 ```json
 {
   "customerId": "customer1",
   "type": "outgoing",
-  "from": "639516185785@s.whatsapp.net",
+  "chatType": "private",
+  "from": "639516185785",
   "pushName": null,
   "message": "Thanks for reaching out!",
+  "messageType": "text",
   "timestamp": 1709812350
 }
 ```
+
+### Webhook Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `customerId` | string | The session/customer ID |
 | `type` | string | `"incoming"` or `"outgoing"` |
-| `from` | string | Remote JID (LID for incoming, phone@s.whatsapp.net for outgoing) |
+| `chatType` | string | `"private"` or `"group"` |
+| `from` | string | Phone number (private) or group ID (group chat) |
+| `participant` | string\|undefined | Only in group messages — phone number of the sender |
 | `pushName` | string\|null | Sender's WhatsApp display name (usually null for outgoing) |
-| `message` | string | The message text |
+| `message` | string | Message text, button display text, or image caption |
+| `messageType` | string | `"text"` or `"image"` |
 | `timestamp` | number | Unix seconds |
+| `image` | object\|undefined | Only when `messageType` is `"image"` |
+| `image.base64` | string | Base64-encoded image data (not saved to disk) |
+| `image.mimetype` | string | e.g. `"image/jpeg"`, `"image/png"` |
+| `image.caption` | string\|null | Image caption if provided |
 
-> `from` for incoming is a WhatsApp LID (Linked Identity) — NOT a phone number. Format: `<id>@lid`.
-> This is how Baileys v7 identifies contacts. Use `pushName` for display and store `from` as-is for sending replies.
-> `from` for outgoing is the recipient's JID (phone@s.whatsapp.net).
+> `from` is a clean phone number (e.g. `639516185785`), not a JID. The gateway resolves LIDs to phone numbers automatically.
+> Button/interactive replies are forwarded as regular text messages with the button's display text in `message`.
+> Images are sent as base64 in the payload — nothing is stored on disk.
 
 ---
 
@@ -234,8 +281,8 @@ The gateway forwards **both incoming and outgoing** messages to `MAIN_SAAS_WEBHO
 2. **Single API key** for all sessions (not per-instance like Green API)
 3. **QR code returned as base64 PNG** directly in the response (no separate getQRCode call)
 4. **Phone number format** — send `to` as plain number (`63XXXXXXXXXX`), no need for `@c.us` suffix
-5. **Webhook payload is simpler** — flat object with `customerId`, `type`, `from`, `pushName`, `message`, `timestamp`
-6. **No chatId@c.us** — our gateway uses LID format (`<id>@lid`) for incoming messages. For sending, use plain phone numbers.
+5. **Webhook payload** — includes `chatType`, `messageType`, `from` as clean phone number, and `image` for photos
+6. **Clean phone numbers** — `from` is always a phone number (e.g. `639516185785`), not a JID or LID. Group messages include `participant` for the sender's number.
 
 ---
 
@@ -277,14 +324,17 @@ const data = await res.json();
 ```typescript
 // This edge function URL goes in the gateway's MAIN_SAAS_WEBHOOK_URL env var
 const payload = await req.json();
-// payload = { customerId, type, from, pushName, message, timestamp }
+// payload = { customerId, type, chatType, from, pushName, message, messageType, timestamp, image?, participant? }
 
 if (payload.type === "incoming") {
-  // Someone messaged the connected WhatsApp number
-  // payload.from is a LID like "80376773001374@lid" — use as-is for replies
-  // Use payload.pushName for display name
-} else if (payload.type === "outgoing") {
-  // The connected WhatsApp number sent a message (e.g. typed from phone)
-  // payload.from is the recipient like "639516185785@s.whatsapp.net"
+  // payload.from = phone number (e.g. "639516185785")
+  // payload.chatType = "private" or "group"
+  // payload.participant = sender's phone (only in group chats)
+
+  if (payload.messageType === "image" && payload.image) {
+    // payload.image.base64 = base64-encoded image data
+    // payload.image.mimetype = "image/jpeg", "image/png", etc.
+    // payload.image.caption = caption text or null
+  }
 }
 ```

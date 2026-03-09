@@ -1,4 +1,25 @@
 const axios = require('axios');
+const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+
+function resolvePhoneNumber(msg) {
+  const remoteJid = msg.key.remoteJid;
+
+  // If it's already a phone number JID, just extract the number
+  if (remoteJid?.endsWith('@s.whatsapp.net')) {
+    return remoteJid.replace(/@.+$/, '');
+  }
+
+  // If it's a LID, check the alternative JID for the phone number
+  if (remoteJid?.endsWith('@lid')) {
+    const altJid = msg.key.remoteJidAlt;
+    if (altJid && altJid.endsWith('@s.whatsapp.net')) {
+      return altJid.replace(/@.+$/, '');
+    }
+  }
+
+  // Fallback: return whatever we have, stripped of domain
+  return remoteJid?.replace(/@.+$/, '') || null;
+}
 
 async function forwardToWebhook(payload) {
   const url = process.env.MAIN_SAAS_WEBHOOK_URL;
@@ -20,27 +41,70 @@ async function forwardToWebhook(payload) {
   }
 }
 
-async function handleMessage(customerId, { messages, type }) {
+async function handleMessage(customerId, { messages, type }, socket) {
   if (type !== 'notify') return;
 
   for (const msg of messages) {
-    const text = msg.message?.conversation
-      || msg.message?.extendedTextMessage?.text;
+    // DEBUG: log raw message structure for button/interactive replies
+    if (msg.message && !msg.message.conversation && !msg.message.extendedTextMessage) {
+      console.log(`[${customerId}] DEBUG raw message keys:`, Object.keys(msg.message));
+      console.log(`[${customerId}] DEBUG raw message:`, JSON.stringify(msg.message, null, 2));
+    }
 
-    if (!text) continue;
+    // DEBUG: log JID resolution
+    console.log(`[${customerId}] DEBUG remoteJid: ${msg.key.remoteJid}, remoteJidAlt: ${msg.key.remoteJidAlt || 'none'}`);
+
+    const imageMessage = msg.message?.imageMessage;
+
+    const text = msg.message?.conversation
+      || msg.message?.extendedTextMessage?.text
+      || msg.message?.buttonsResponseMessage?.selectedDisplayText
+      || msg.message?.listResponseMessage?.title
+      || msg.message?.templateButtonReplyMessage?.selectedDisplayText
+      || msg.message?.nativeFlowResponseMessage?.params
+      || msg.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.params
+      || imageMessage?.caption
+      || null;
+
+    // Skip messages with no text and no image
+    if (!text && !imageMessage) continue;
 
     const direction = msg.key.fromMe ? 'outgoing' : 'incoming';
+
+    const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
 
     const payload = {
       customerId,
       type: direction,
-      from: msg.key.remoteJid,
+      chatType: isGroup ? 'group' : 'private',
+      from: resolvePhoneNumber(msg),
+      ...(isGroup && { participant: msg.key.participant?.replace(/@.+$/, '') || null }),
       pushName: msg.pushName || null,
-      message: text,
+      message: text || '',
+      messageType: imageMessage ? 'image' : 'text',
       timestamp: msg.messageTimestamp,
     };
 
-    console.log(`[${customerId}] ${direction} ${direction === 'incoming' ? 'from' : 'to'} ${payload.from}`);
+    // Download image and attach as base64 (no disk storage)
+    if (imageMessage) {
+      try {
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+          logger: undefined,
+          reuploadRequest: socket.updateMediaMessage,
+        });
+        payload.image = {
+          base64: buffer.toString('base64'),
+          mimetype: imageMessage.mimetype || 'image/jpeg',
+          caption: imageMessage.caption || null,
+        };
+      } catch (err) {
+        console.error(`[${customerId}] Failed to download image: ${err.message}`);
+        payload.image = null;
+        payload.imageError = 'Failed to download image';
+      }
+    }
+
+    console.log(`[${customerId}] ${direction} ${direction === 'incoming' ? 'from' : 'to'} ${payload.from} [${payload.messageType}]`);
     forwardToWebhook(payload);
   }
 }

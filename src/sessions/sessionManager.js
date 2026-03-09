@@ -51,7 +51,7 @@ async function startSession(customerId) {
     socket.ev.on('creds.update', saveCreds);
 
     socket.ev.on('messages.upsert', (upsert) => {
-      handleMessage(customerId, upsert);
+      handleMessage(customerId, upsert, socket);
     });
 
     socket.ev.on('connection.update', async (update) => {

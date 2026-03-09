@@ -117,35 +117,77 @@ curl -X POST http://localhost:3000/api/session/send-buttons/customer1 -H "Conten
 
 Both incoming and outgoing messages are forwarded to your webhook URL. Check your webhook.site dashboard.
 
-**Incoming** (send a WhatsApp message TO the connected number from another phone):
+**Incoming text (private chat):**
 
 ```json
 {
   "customerId": "customer1",
   "type": "incoming",
-  "from": "80376773001374@lid",
+  "chatType": "private",
+  "from": "639516185785",
   "pushName": "Sender Name",
   "message": "the message text",
+  "messageType": "text",
   "timestamp": 1709827200
 }
 ```
 
-**Outgoing** (send a message FROM the connected number, e.g. typed on the phone):
+**Incoming image (private chat):**
+
+```json
+{
+  "customerId": "customer1",
+  "type": "incoming",
+  "chatType": "private",
+  "from": "639516185785",
+  "pushName": "Sender Name",
+  "message": "caption text or empty string",
+  "messageType": "image",
+  "timestamp": 1709827200,
+  "image": {
+    "base64": "/9j/4AAQSkZJRg...",
+    "mimetype": "image/jpeg",
+    "caption": "caption text"
+  }
+}
+```
+
+**Incoming message (group chat):**
+
+```json
+{
+  "customerId": "customer1",
+  "type": "incoming",
+  "chatType": "group",
+  "from": "120363044555888777",
+  "participant": "639516185785",
+  "pushName": "Sender Name",
+  "message": "hello everyone",
+  "messageType": "text",
+  "timestamp": 1709827200
+}
+```
+
+**Outgoing message:**
 
 ```json
 {
   "customerId": "customer1",
   "type": "outgoing",
-  "from": "639516185785@s.whatsapp.net",
+  "chatType": "private",
+  "from": "639516185785",
   "pushName": null,
   "message": "the reply text",
+  "messageType": "text",
   "timestamp": 1709827210
 }
 ```
 
-> `type` is `"incoming"` or `"outgoing"`.
-> `from` for incoming is a WhatsApp LID (Linked Identity), not a phone number. Use `pushName` for display.
-> `from` for outgoing is the recipient's JID.
+> `from` is a phone number (e.g. `639516185785`) for private chats, or a group ID for group chats.
+> `participant` is only present in group messages — it's the phone number of who sent the message.
+> `chatType` is `"private"` or `"group"`.
+> `messageType` is `"text"` or `"image"`. Images include a `base64` field (no files saved to disk).
+> Button replies are detected and forwarded as text messages with the button's display text.
 
 ## 11. Delete a Session
 
