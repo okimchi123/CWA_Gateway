@@ -92,11 +92,35 @@ async function startSession(customerId) {
           await fs.rm(authDir, { recursive: true, force: true }).catch(() => {});
           session.status = 'logged_out';
         } else {
-          sessions.delete(customerId);
-          console.log(`[${customerId}] Reconnecting...`);
-          startSession(customerId).catch((err) => {
-            console.error(`[${customerId}] Reconnect failed:`, err.message);
-          });
+          session.status = 'disconnected';
+          console.log(`[${customerId}] Disconnected, attempting reconnection...`);
+
+          const MAX_RETRIES = 3;
+          for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            console.log(`[${customerId}] Reconnect attempt ${attempt}/${MAX_RETRIES}`);
+            try {
+              const result = await startSession(customerId);
+              if (result.status === 'connected' || result.status === 'qr_generated' || result.status === 'already_connected') {
+                console.log(`[${customerId}] Reconnected on attempt ${attempt}`);
+                break;
+              }
+            } catch (err) {
+              console.error(`[${customerId}] Reconnect attempt ${attempt} failed:`, err.message);
+            }
+
+            if (attempt < MAX_RETRIES) {
+              await new Promise((r) => setTimeout(r, 3000 * attempt));
+            } else {
+              console.error(`[${customerId}] All ${MAX_RETRIES} reconnect attempts failed, staying disconnected`);
+              // Ensure the session stays in the map with "disconnected" status
+              const current = sessions.get(customerId);
+              if (current) {
+                current.status = 'disconnected';
+              } else {
+                sessions.set(customerId, { socket: null, status: 'disconnected', qr: null });
+              }
+            }
+          }
         }
 
         if (!resolved) {
