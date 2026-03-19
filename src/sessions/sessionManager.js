@@ -23,7 +23,7 @@ async function startSession(customerId) {
   if (sessions.has(customerId)) {
     const existing = sessions.get(customerId);
     if (existing.status === 'connected') {
-      return { status: 'already_connected' };
+      return { status: 'already_connected', phoneNumber: getConnectedPhoneNumber(existing.socket) };
     }
   }
 
@@ -132,6 +132,12 @@ async function startSession(customerId) {
   });
 }
 
+function getConnectedPhoneNumber(socket) {
+  const id = socket?.user?.id;
+  if (!id) return null;
+  return id.split(/[:@]/)[0] || null;
+}
+
 function getSession(customerId) {
   return sessions.get(customerId) || null;
 }
@@ -139,7 +145,11 @@ function getSession(customerId) {
 function getSessionStatus(customerId) {
   const session = sessions.get(customerId);
   if (!session) return { status: 'not_found' };
-  return { status: session.status, qr: session.qr };
+  const result = { status: session.status, qr: session.qr };
+  if (session.status === 'connected') {
+    result.phoneNumber = getConnectedPhoneNumber(session.socket);
+  }
+  return result;
 }
 
 async function deleteSession(customerId) {
