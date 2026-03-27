@@ -7,7 +7,7 @@ const STORAGE_DIR = path.join(__dirname, '..', '..', 'storage');
 const logger = pino({ level: 'warn' });
 
 // In-memory store of active sessions
-// Map<customerId, { socket, status, qr }>
+// Map<customerId, { socket, status, qr, webhookUrl }>
 const sessions = new Map();
 
 let baileys = null;
@@ -19,7 +19,7 @@ async function loadBaileys() {
   return baileys;
 }
 
-async function startSession(customerId) {
+async function startSession(customerId, webhookUrl) {
   if (sessions.has(customerId)) {
     const existing = sessions.get(customerId);
     if (existing.status === 'connected') {
@@ -42,7 +42,21 @@ async function startSession(customerId) {
     version,
   });
 
-  const session = { socket, status: 'connecting', qr: null };
+  // Resolve webhookUrl: use provided value, or load from persisted config, or null (fallback to env)
+  const configPath = path.join(authDir, 'config.json');
+  if (webhookUrl) {
+    const fs2 = require('fs');
+    if (!fs2.existsSync(authDir)) fs2.mkdirSync(authDir, { recursive: true });
+    fs2.writeFileSync(configPath, JSON.stringify({ webhookUrl }));
+  } else if (!webhookUrl) {
+    try {
+      const fs2 = require('fs');
+      const cfg = JSON.parse(fs2.readFileSync(configPath, 'utf8'));
+      webhookUrl = cfg.webhookUrl || null;
+    } catch { webhookUrl = null; }
+  }
+
+  const session = { socket, status: 'connecting', qr: null, webhookUrl };
   sessions.set(customerId, session);
 
   return new Promise((resolve) => {
@@ -51,7 +65,7 @@ async function startSession(customerId) {
     socket.ev.on('creds.update', saveCreds);
 
     socket.ev.on('messages.upsert', (upsert) => {
-      handleMessage(customerId, upsert, socket);
+      handleMessage(customerId, upsert, socket, session.webhookUrl);
     });
 
     socket.ev.on('connection.update', async (update) => {
@@ -99,7 +113,7 @@ async function startSession(customerId) {
           for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             console.log(`[${customerId}] Reconnect attempt ${attempt}/${MAX_RETRIES}`);
             try {
-              const result = await startSession(customerId);
+              const result = await startSession(customerId, session.webhookUrl);
               if (result.status === 'connected' || result.status === 'qr_generated' || result.status === 'already_connected') {
                 console.log(`[${customerId}] Reconnected on attempt ${attempt}`);
                 break;
@@ -188,11 +202,17 @@ async function restoreSessions() {
   }
 }
 
+function getSessionWebhookUrl(customerId) {
+  const session = sessions.get(customerId);
+  return session?.webhookUrl || null;
+}
+
 module.exports = {
   sessions,
   startSession,
   getSession,
   getSessionStatus,
+  getSessionWebhookUrl,
   deleteSession,
   restoreSessions,
 };

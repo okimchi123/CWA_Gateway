@@ -21,10 +21,10 @@ function resolvePhoneNumber(msg) {
   return remoteJid?.replace(/@.+$/, '') || null;
 }
 
-async function forwardToWebhook(payload) {
-  const url = process.env.MAIN_SAAS_WEBHOOK_URL;
+async function forwardToWebhook(payload, webhookUrl) {
+  const url = webhookUrl || process.env.MAIN_SAAS_WEBHOOK_URL;
   if (!url) {
-    console.error('[webhook] MAIN_SAAS_WEBHOOK_URL is not set, skipping');
+    console.error('[webhook] No webhookUrl and MAIN_SAAS_WEBHOOK_URL is not set, skipping');
     return;
   }
 
@@ -41,7 +41,7 @@ async function forwardToWebhook(payload) {
   }
 }
 
-async function handleMessage(customerId, { messages, type }, socket) {
+async function handleMessage(customerId, { messages, type }, socket, webhookUrl) {
   if (type !== 'notify') return;
 
   for (const msg of messages) {
@@ -105,7 +105,7 @@ async function handleMessage(customerId, { messages, type }, socket) {
     }
 
     console.log(`[${customerId}] ${direction} ${direction === 'incoming' ? 'from' : 'to'} ${payload.from} [${payload.messageType}]`);
-    forwardToWebhook(payload);
+    forwardToWebhook(payload, webhookUrl);
   }
 }
 

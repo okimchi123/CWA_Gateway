@@ -20,7 +20,8 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 
 router.post('/session/start/:customerId', async (req, res) => {
   try {
     const { customerId } = req.params;
-    const result = await startSession(customerId);
+    const { webhookUrl } = req.body || {};
+    const result = await startSession(customerId, webhookUrl);
     res.json(result);
   } catch (err) {
     console.error(`[start] Error for ${req.params.customerId}:`, err.message);
