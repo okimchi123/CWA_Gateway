@@ -9,14 +9,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/okimchi123/W_app-gateway.git"
+    "url": "git+https://github.com/okimchi123/CWA_Gateway.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/okimchi123/W_app-gateway/issues"
+    "url": "https://github.com/okimchi123/CWA_Gateway/issues"
   },
   "homepage": "https://github.com/okimchi123/W_app-gateway#readme",
   "dependencies": {
