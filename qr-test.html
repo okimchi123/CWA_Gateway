@@ -1,0 +1,23 @@
+<html>
+<body style="display:flex;justify-content:center;align-items:center;height:100vh;background:#111">
+<div style="text-align:center">
+<h2 style="color:white;font-family:sans-serif">Scan this QR with WhatsApp</h2>
+<p style="color:#aaa;font-family:sans-serif">WhatsApp → Settings → Linked Devices → Link a Device</p>
+<img id="qr" style="width:400px;height:400px;border-radius:12px" />
+<p style="color:#aaa;font-family:sans-serif;margin-top:16px">QR expires in ~60s. Refresh page to get a new one.</p>
+</div>
+<script>
+async function loadQR() {
+  const res = await fetch('http://localhost:3000/api/session/start/ef325088-709f-438e-9d13-803bc561e710', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ webhookUrl: 'https://wkjinyqkvfszgbttmbit.supabase.co/functions/v1/flow-webhook' })
+  });
+  const data = await res.json();
+  if (data.qr) document.getElementById('qr').src = data.qr;
+  else document.querySelector('h2').textContent = 'Status: ' + data.status;
+}
+loadQR();
+</script>
+</body>
+</html>

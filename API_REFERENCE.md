@@ -1,8 +1,6 @@
-# WClixAPI - Custom WhatsApp Gateway API Reference
+# WhatsApp Gateway API Reference
 
-> This replaces Green API. Use this reference when building or updating Supabase edge functions.
-
-**Base URL:** `https://wa.clixwapp.online`
+> Multi-tenant WhatsApp gateway. Each SaaS project passes its own webhook URL when starting sessions.
 
 **Auth:** All `/api/*` endpoints require header: `x-api-key: <your-api-key>`
 
@@ -14,7 +12,17 @@
 
 ```
 POST /api/session/start/:customerId
+Content-Type: application/json
 ```
+
+**Body (optional):**
+```json
+{
+  "webhookUrl": "https://your-project.supabase.co/functions/v1/flow-webhook"
+}
+```
+
+If `webhookUrl` is provided, it is persisted to `storage/{customerId}/config.json` and used for all message forwarding for this session. If omitted, the session falls back to the `MAIN_SAAS_WEBHOOK_URL` env var.
 
 **Response (first time - needs QR scan):**
 ```json
@@ -175,7 +183,7 @@ GET /health
 
 ## Message Webhook
 
-The gateway forwards **both incoming and outgoing** messages to `MAIN_SAAS_WEBHOOK_URL` via POST.
+The gateway forwards **both incoming and outgoing** messages to the session's `webhookUrl` (or `MAIN_SAAS_WEBHOOK_URL` fallback) via POST.
 
 ### Private text message
 ```json
@@ -263,34 +271,34 @@ The gateway forwards **both incoming and outgoing** messages to `MAIN_SAAS_WEBHO
 
 ---
 
-## Migration from Green API
+## Multi-Tenant Usage
 
-| Green API | WClixAPI (ours) |
-|-----------|-----------------|
-| `POST /waInstance.../sendMessage` | `POST /api/session/send/:customerId` |
-| `POST /waInstance.../SendFileByUpload` | `POST /api/session/send-file/:customerId` |
-| `POST /waInstance.../getQRCode` | `POST /api/session/start/:customerId` |
-| `GET /waInstance.../getStateInstance` | `GET /api/session/status/:customerId` |
-| `POST /waInstance.../logout` | `DELETE /api/session/:customerId` |
-| Webhook: `stateInstanceChanged` | `GET /api/session/status/:customerId` (poll) |
-| Webhook: `incomingMessageReceived` | Our gateway POSTs to `MAIN_SAAS_WEBHOOK_URL` (type: `incoming`) |
-| Webhook: `outgoingMessageStatus` | Our gateway POSTs to `MAIN_SAAS_WEBHOOK_URL` (type: `outgoing`) |
+Multiple SaaS projects can share a single gateway instance. Each project passes its own `webhookUrl` when starting sessions:
 
-### Key differences from Green API:
-1. **No instance creation** — just call `/api/session/start/:customerId` with any customer ID
-2. **Single API key** for all sessions (not per-instance like Green API)
-3. **QR code returned as base64 PNG** directly in the response (no separate getQRCode call)
-4. **Phone number format** — send `to` as plain number (`63XXXXXXXXXX`), no need for `@c.us` suffix
-5. **Webhook payload** — includes `chatType`, `messageType`, `from` as clean phone number, and `image` for photos
-6. **Clean phone numbers** — `from` is always a phone number (e.g. `639516185785`), not a JID or LID. Group messages include `participant` for the sender's number.
+```typescript
+// Project A's edge function — starts session with its own webhook
+const res = await fetch(
+  `https://your-gateway-domain.com/api/session/start/${customerId}`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": Deno.env.get("WA_GATEWAY_API_KEY")!,
+    },
+    body: JSON.stringify({
+      webhookUrl: "https://project-a.supabase.co/functions/v1/flow-webhook"
+    }),
+  }
+);
+```
 
----
+Sessions without a `webhookUrl` fall back to `MAIN_SAAS_WEBHOOK_URL` env var.
 
-## Example: Supabase Edge Function - Send Message
+## Example: Send Message from Edge Function
 
 ```typescript
 const res = await fetch(
-  `https://wa.clixwapp.online/api/session/send/${customerId}`,
+  `https://your-gateway-domain.com/api/session/send/${customerId}`,
   {
     method: "POST",
     headers: {
@@ -300,41 +308,4 @@ const res = await fetch(
     body: JSON.stringify({ to: phoneNumber, message: text }),
   }
 );
-const data = await res.json();
-```
-
-## Example: Supabase Edge Function - Start Session
-
-```typescript
-const res = await fetch(
-  `https://wa.clixwapp.online/api/session/start/${customerId}`,
-  {
-    method: "POST",
-    headers: {
-      "x-api-key": Deno.env.get("WA_GATEWAY_API_KEY")!,
-    },
-  }
-);
-const data = await res.json();
-// data.qr = "data:image/png;base64,..." (display this in your frontend)
-```
-
-## Example: Supabase Edge Function - Receive Messages
-
-```typescript
-// This edge function URL goes in the gateway's MAIN_SAAS_WEBHOOK_URL env var
-const payload = await req.json();
-// payload = { customerId, type, chatType, from, pushName, message, messageType, timestamp, image?, participant? }
-
-if (payload.type === "incoming") {
-  // payload.from = phone number (e.g. "639516185785")
-  // payload.chatType = "private" or "group"
-  // payload.participant = sender's phone (only in group chats)
-
-  if (payload.messageType === "image" && payload.image) {
-    // payload.image.base64 = base64-encoded image data
-    // payload.image.mimetype = "image/jpeg", "image/png", etc.
-    // payload.image.caption = caption text or null
-  }
-}
 ```
